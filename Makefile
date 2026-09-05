@@ -1,5 +1,7 @@
-CXX := clang++
-CC  := clang
+# Override on the command line if these aren't on PATH, e.g. on a Linux box
+# without clang installed: `make CXX=g++ CC=gcc`.
+CXX ?= clang++
+CC  ?= clang
 
 CXXFLAGS := -std=c++17 -O2 -Wall
 CFLAGS   := -std=c11 -O2 -Wall
@@ -7,8 +9,22 @@ CFLAGS   := -std=c11 -O2 -Wall
 BUILD_DIR := build
 TARGET    := imgui-test
 
-INCLUDES := -Iimgui -Iimgui/backends -Iqrcodegen -Ijson -I$(BUILD_DIR) $(shell sdl2-config --cflags)
-LDFLAGS  := $(shell sdl2-config --libs) -lcurl
+PKG_CONFIG ?= pkg-config
+
+# Prefer pkg-config (what most Linux distros ship for SDL2 nowadays); fall
+# back to the sdl2-config script (typical on macOS/Homebrew, and on Linux
+# distros that still ship it).
+SDL2_CFLAGS := $(shell $(PKG_CONFIG) --cflags sdl2 2>/dev/null || sdl2-config --cflags 2>/dev/null)
+SDL2_LIBS   := $(shell $(PKG_CONFIG) --libs sdl2 2>/dev/null || sdl2-config --libs 2>/dev/null)
+
+# Same idea for libcurl: pkg-config if available, otherwise assume it's on
+# the default include/library search path (true on macOS and most Linux
+# distros with libcurl-dev/libcurl-devel installed).
+CURL_CFLAGS := $(shell $(PKG_CONFIG) --cflags libcurl 2>/dev/null)
+CURL_LIBS   := $(shell $(PKG_CONFIG) --libs libcurl 2>/dev/null || echo -lcurl)
+
+INCLUDES := -Iimgui -Iimgui/backends -Iqrcodegen -Ijson -I$(BUILD_DIR) $(SDL2_CFLAGS) $(CURL_CFLAGS)
+LDFLAGS  := $(SDL2_LIBS) $(CURL_LIBS)
 
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)

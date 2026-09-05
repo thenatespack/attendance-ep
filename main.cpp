@@ -12,6 +12,7 @@
 #include <chrono>
 #include <memory>
 #include <climits>
+#include <algorithm>
 
 #include "imgui.h"
 #include "backends/imgui_impl_sdl2.h"
@@ -272,10 +273,6 @@ int main(int argc, char* argv[])
     if (!apiClient.IsReachable())
         printf("Attendance API at %s is unreachable; showing offline demo data.\n", apiUrl.c_str());
 
-    std::string headerRoom = configuredRoom.empty()
-        ? (schedule.empty() ? "—" : schedule[0].room)
-        : configuredRoom;
-
     // Initialize SDL
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_GAMECONTROLLER) != 0)
     {
@@ -442,10 +439,10 @@ int main(int argc, char* argv[])
 
         ImGui::Begin("Attendance", nullptr, windowFlags);
 
-        // Header bar: app name on the left, version + room on the right.
+        // Header bar: app name on the left, version on the right.
         {
-            char rightLabel[96];
-            snprintf(rightLabel, sizeof(rightLabel), "v%s    Room %s", kAppVersion, headerRoom.c_str());
+            char rightLabel[32];
+            snprintf(rightLabel, sizeof(rightLabel), "v%s", kAppVersion);
 
             ImGui::TextUnformatted("Attendance Tool");
             ImGui::SameLine();
@@ -466,18 +463,25 @@ int main(int argc, char* argv[])
         ImGui::Separator();
         ImGui::Spacing();
 
+        // Bigger, more spread-out rows so a handful of classes still fill a
+        // fullscreen kiosk panel instead of leaving most of it blank. Room
+        // isn't shown per-row either: the kiosk is already scoped to one
+        // room, so every row would just repeat the same value.
+        const float scheduleFontScale = 1.3f;
+        const float timeColumnWidth = 160.0f * scheduleFontScale;
+
+        ImGui::SetWindowFontScale(scheduleFontScale);
         for (const ScheduleEntry& item : schedule)
         {
             ImGui::TextUnformatted(item.time.c_str());
-            ImGui::SameLine(140.0f);
+            ImGui::SameLine(timeColumnWidth);
             ImGui::TextWrapped("%s", item.course.c_str());
 
-            ImGui::Indent(140.0f);
-            ImGui::TextDisabled("%s", item.room.c_str());
-            ImGui::Unindent(140.0f);
-
+            ImGui::Spacing();
+            ImGui::Spacing();
             ImGui::Spacing();
         }
+        ImGui::SetWindowFontScale(1.0f);
 
         ImGui::EndChild();
 
@@ -495,11 +499,36 @@ int main(int argc, char* argv[])
         ImGui::Separator();
         ImGui::Spacing();
 
-        const float moduleSize = 4.0f;
-        const int qrSize = qrcodegen_getSize(qrCode);
-        const float qrPixelSize = (float)(qrSize + 8) * moduleSize;
-
         const float availWidth = ImGui::GetContentRegionAvail().x;
+        const float availHeight = ImGui::GetContentRegionAvail().y;
+
+        const float codeFontScale = 2.4f;
+        const float progressBarHeight = 32.0f;
+        const float smallSpacing = 12.0f;
+        const float bigSpacing = 24.0f;
+
+        ImGui::SetWindowFontScale(codeFontScale);
+        const float codeTextHeight = ImGui::GetTextLineHeight();
+        ImGui::SetWindowFontScale(1.0f);
+
+        // Size the QR to use as much of the panel as it can, reserving just
+        // enough room below it for the code text and countdown bar.
+        const float reservedHeight = smallSpacing + codeTextHeight + bigSpacing + progressBarHeight;
+        float qrBudget = std::min(availWidth * 0.9f, availHeight - reservedHeight);
+        if (qrBudget < 50.0f)
+            qrBudget = 50.0f;
+
+        const int qrModules = qrcodegen_getSize(qrCode) + 8; // + quiet zone border
+        float moduleSize = qrBudget / (float)qrModules;
+        if (moduleSize < 2.0f)
+            moduleSize = 2.0f;
+
+        const float qrPixelSize = moduleSize * (float)qrModules;
+        const float blockHeight = qrPixelSize + reservedHeight;
+        const float verticalOffset = (availHeight - blockHeight) * 0.5f;
+        if (verticalOffset > 0.0f)
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + verticalOffset);
+
         const float qrOffsetX = (availWidth - qrPixelSize) * 0.5f;
         if (qrOffsetX > 0.0f)
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + qrOffsetX);
@@ -510,13 +539,15 @@ int main(int argc, char* argv[])
 
         ImGui::Spacing();
 
-        // Centered code text.
+        // Centered, enlarged code text.
         {
+            ImGui::SetWindowFontScale(codeFontScale);
             float textWidth = ImGui::CalcTextSize(currentCode.c_str()).x;
             float offsetX = (availWidth - textWidth) * 0.5f;
             if (offsetX > 0.0f)
                 ImGui::SetCursorPosX(ImGui::GetCursorPosX() + offsetX);
             ImGui::TextUnformatted(currentCode.c_str());
+            ImGui::SetWindowFontScale(1.0f);
         }
 
         ImGui::Spacing();
@@ -528,7 +559,7 @@ int main(int argc, char* argv[])
         float fraction = totpPeriodSeconds > 0.0 ? (float)(secondsRemaining / totpPeriodSeconds) : 0.0f;
         if (fraction < 0.0f) fraction = 0.0f;
         if (fraction > 1.0f) fraction = 1.0f;
-        ImGui::ProgressBar(fraction, ImVec2(-FLT_MIN, 0.0f), overlay);
+        ImGui::ProgressBar(fraction, ImVec2(-FLT_MIN, progressBarHeight), overlay);
 
         ImGui::EndChild();
 

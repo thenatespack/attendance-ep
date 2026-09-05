@@ -90,6 +90,16 @@ $(BUILD_DIR)/version.h: FORCE
 
 $(BUILD_DIR)/main.o: $(BUILD_DIR)/version.h
 
+# Make has no idea that CXXFLAGS/CFLAGS changed when only the Makefile
+# itself changes (e.g. after `git pull` adds a new -D flag) — it only
+# compares each .o's timestamp against its .cpp/.c file. Without this, a
+# stale .o built under old flags can get silently relinked, producing a
+# binary that doesn't match the current source (bit us in practice: an
+# object built without -DIMGUI_IMPL_OPENGL_ES2 kept the desktop-GL loader
+# code path after that flag was added). Depending every object on the
+# Makefile forces a full rebuild whenever it changes.
+$(OBJS): Makefile
+
 run: $(TARGET)
 	./$(TARGET)
 

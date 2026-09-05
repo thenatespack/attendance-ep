@@ -355,7 +355,17 @@ int main(int argc, char* argv[])
 
     // Initialize ImGui SDL2 + OpenGL3 backends
     ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
-    ImGui_ImplOpenGL3_Init(glsl_version);
+    if (!ImGui_ImplOpenGL3_Init(glsl_version))
+    {
+        printf("ImGui_ImplOpenGL3_Init failed (see \"Failed to initialize OpenGL loader!\" above "
+               "if printed) - GL version/loader mismatch. Try `make clean && make`.\n");
+        ImGui_ImplSDL2_Shutdown();
+        ImGui::DestroyContext();
+        SDL_GL_DeleteContext(gl_context);
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return 1;
+    }
 
     bool running = true;
 

@@ -116,7 +116,8 @@ never touches GitHub Actions, so it costs nothing beyond the Docker build time o
 
 ## Self-updating deployment on the Pi
 
-The Pi can keep itself up to date on its own: a systemd timer checks GitHub every 30 minutes,
+The Pi can keep itself up to date on its own: a systemd timer checks GitHub every 5 minutes
+(adjust `OnUnitActiveSec=` in `deploy/systemd/attendance-update.timer` to change the cadence),
 and if the latest release differs from what's installed, downloads the matching binary, swaps
 it in, and restarts the app. If the new binary doesn't survive a short grace period after
 restart, it's automatically rolled back to the previous one — see `deploy/bin/update.py` for

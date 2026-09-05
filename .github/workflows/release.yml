@@ -1,0 +1,56 @@
+name: Release
+
+# Push a tag like v1.0.1 to build + publish a GitHub Release with the Linux
+# binaries attached. `workflow_dispatch` lets you run the same build on
+# demand (e.g. from the Actions tab) without cutting a release, useful for
+# testing the pipeline itself - those runs just produce downloadable
+# workflow artifacts instead of a Release.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - platform: linux/arm64
+            arch: arm64
+          - platform: linux/amd64
+            arch: amd64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Cross-build (${{ matrix.platform }})
+        run: |
+          docker buildx build --platform ${{ matrix.platform }} -f Dockerfile.linux -o type=local,dest=./dist .
+          mv dist/imgui-test dist/imgui-test-linux-${{ matrix.arch }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: imgui-test-linux-${{ matrix.arch }}
+          path: dist/imgui-test-linux-${{ matrix.arch }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*/imgui-test-linux-*
+          generate_release_notes: true

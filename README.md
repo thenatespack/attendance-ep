@@ -72,6 +72,27 @@ architecture match. For a 32-bit Raspberry Pi OS or a generic x86_64 box, edit t
 `--platform` flag in the `linux-arm64` target (or `Dockerfile.linux`'s comment) to
 `linux/arm/v7` or `linux/amd64` respectively.
 
+## Releases (prebuilt binaries)
+
+Pushing a version tag builds Linux `arm64` and `amd64` binaries in CI (`.github/workflows/release.yml`)
+and publishes them as a GitHub Release — no need to clone/build on the Pi at all:
+
+```sh
+git tag v1.0.1
+git push origin v1.0.1
+```
+
+Then on the Pi:
+
+```sh
+curl -L -o imgui-test https://github.com/thenatespack/attendance-ep/releases/latest/download/imgui-test-linux-arm64
+chmod +x imgui-test
+```
+
+`releases/latest/download/...` always points at the newest release, so that URL never changes.
+You can also trigger the same build without cutting a release from the Actions tab
+(`workflow_dispatch`) — that run's binaries show up as workflow artifacts instead.
+
 ## Run
 
 ```sh

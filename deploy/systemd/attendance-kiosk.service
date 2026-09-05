@@ -1,11 +1,14 @@
 [Unit]
 Description=Attendance EP kiosk display
-After=graphical.target
+After=graphical.target display-manager.service
 Wants=graphical.target
 
 # graphical.target can report active slightly before the desktop
-# session/X server is actually ready to accept connections; see the
-# Restart= comment below for what that races into. Uncapping the
+# session/X server is actually ready to accept connections; ordering after
+# display-manager.service too (the actual X/lightdm service, aliased to
+# whichever display manager is installed) is a closer proxy for "X is
+# really up" than the target alone. Even so, this can still race -- see
+# the Restart= comment below for what happens when it does. Uncapping the
 # restart-rate limit means a flaky boot that needs several quick restarts
 # in a row still ends up running, instead of systemd giving up after its
 # default 5-in-10s burst and leaving the unit "failed".

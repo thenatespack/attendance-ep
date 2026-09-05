@@ -47,6 +47,23 @@ make
 
 This compiles everything into object files and links the `imgui-test` binary.
 
+## Cross-building for Linux (e.g. Raspberry Pi) from macOS
+
+```sh
+make linux-arm64
+```
+
+Builds inside a Debian Bookworm container via Docker buildx and drops the result at
+`dist/imgui-test` — a native `aarch64` ELF binary. Debian Bookworm is what Raspberry Pi OS
+(64-bit) is built on, so it links against the same SDL2/libcurl/libGL SONAMEs already on the
+device; just copy `dist/imgui-test` over and run it alongside your `.env`.
+
+Requires Docker (with buildx, bundled in Docker Desktop and OrbStack) running locally. On
+Apple Silicon this runs natively — no QEMU emulation needed, since the host and target
+architecture match. For a 32-bit Raspberry Pi OS or a generic x86_64 box, edit the
+`--platform` flag in the `linux-arm64` target (or `Dockerfile.linux`'s comment) to
+`linux/arm/v7` or `linux/amd64` respectively.
+
 ## Run
 
 ```sh

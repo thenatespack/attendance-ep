@@ -1,7 +1,7 @@
+.git
 .env
-
-/build/
-/dist/
+build/
+dist/
 imgui-test
 imgui-test.dSYM/
 imgui.ini

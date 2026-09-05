@@ -60,7 +60,7 @@ C_SRCS := qrcodegen/qrcodegen.c
 
 OBJS := $(patsubst %.cpp,$(BUILD_DIR)/%.o,$(CPP_SRCS)) $(patsubst %.c,$(BUILD_DIR)/%.o,$(C_SRCS))
 
-.PHONY: all run clean FORCE
+.PHONY: all run clean linux-arm64 FORCE
 
 all: $(TARGET)
 
@@ -91,3 +91,9 @@ run: $(TARGET)
 
 clean:
 	rm -rf $(BUILD_DIR) $(TARGET)
+
+# Cross-builds a Linux/aarch64 binary (e.g. Raspberry Pi OS 64-bit) via
+# Docker, dropping the result at dist/imgui-test. Requires Docker with
+# buildx (Docker Desktop and OrbStack both include it).
+linux-arm64:
+	docker buildx build --platform linux/arm64 -f Dockerfile.linux -o type=local,dest=./dist .

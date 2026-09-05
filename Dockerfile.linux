@@ -1,0 +1,30 @@
+# Cross-builds the Linux binary from macOS (or any host) via:
+#   docker buildx build --platform linux/arm64 -f Dockerfile.linux -o type=local,dest=./dist .
+#
+# Debian Bookworm matches Raspberry Pi OS (which *is* Debian Bookworm plus
+# Pi-specific packages), so the resulting binary links against the same
+# SDL2/libcurl/libGL SONAMEs already present on the device.
+#
+# Swap --platform to linux/arm/v7 for 32-bit Raspberry Pi OS, or
+# linux/amd64 for a generic x86_64 Linux box.
+
+FROM debian:bookworm AS build
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libsdl2-dev \
+    libcurl4-openssl-dev \
+    libgl-dev \
+    pkg-config \
+    ca-certificates \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY . .
+
+RUN make clean && make -j"$(nproc)"
+
+# Export just the binary, not the whole build image.
+FROM scratch AS export
+COPY --from=build /src/imgui-test /imgui-test

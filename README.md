@@ -11,12 +11,32 @@ The screen shows three things and nothing is clickable:
 
 ## Dependencies
 
-- A C++17 compiler (`clang++` by default)
-- [SDL2](https://www.libsdl.org/) — install via Homebrew: `brew install sdl2`
-- OpenGL (system-provided; `OpenGL.framework` on macOS, `libGL` on Linux)
+- A C++17 compiler (Apple clang on macOS, GCC on Linux — whatever `make` finds by default)
+- [SDL2](https://www.libsdl.org/)
+- [libcurl](https://curl.se/libcurl/) (used for the AttendanceApi calls)
+- OpenGL dev headers (system-provided on macOS; a `libgl`/`mesa` dev package on Linux)
 
-Dear ImGui (`imgui/`) and the QR code generator (`qrcodegen/`,
-[Nayuki's QR Code generator library](https://github.com/nayuki/QR-Code-generator), MIT licensed)
+macOS (Homebrew):
+
+```sh
+brew install sdl2 curl
+```
+
+Debian/Ubuntu:
+
+```sh
+sudo apt install build-essential libsdl2-dev libcurl4-openssl-dev libgl-dev pkg-config
+```
+
+Fedora:
+
+```sh
+sudo dnf install gcc-c++ SDL2-devel libcurl-devel mesa-libGL-devel pkgconf-pkg-config
+```
+
+Dear ImGui (`imgui/`), the QR code generator (`qrcodegen/`,
+[Nayuki's QR Code generator library](https://github.com/nayuki/QR-Code-generator), MIT licensed),
+and the JSON library (`json/`, [nlohmann/json](https://github.com/nlohmann/json), MIT licensed)
 are vendored directly in this repo — no package manager needed for those.
 
 ## Build

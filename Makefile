@@ -1,7 +1,9 @@
-# Override on the command line if these aren't on PATH, e.g. on a Linux box
-# without clang installed: `make CXX=g++ CC=gcc`.
-CXX ?= clang++
-CC  ?= clang
+# Deliberately not hardcoded to clang++/clang: Make's built-in defaults
+# (c++/cc) already resolve to the right compiler per platform (Apple clang
+# on macOS, GCC on most Linux distros), and `CXX ?=`/`CC ?=` can't override
+# those built-in defaults anyway (they're never "unset" as far as Make is
+# concerned). Override explicitly if you want a specific one, e.g.
+# `make CXX=g++ CC=gcc` or `make CXX=clang++ CC=clang`.
 
 CXXFLAGS := -std=c++17 -O2 -Wall
 CFLAGS   := -std=c11 -O2 -Wall

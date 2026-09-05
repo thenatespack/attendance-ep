@@ -3,6 +3,14 @@ Description=Attendance EP kiosk display
 After=graphical.target
 Wants=graphical.target
 
+# graphical.target can report active slightly before the desktop
+# session/X server is actually ready to accept connections; see the
+# Restart= comment below for what that races into. Uncapping the
+# restart-rate limit means a flaky boot that needs several quick restarts
+# in a row still ends up running, instead of systemd giving up after its
+# default 5-in-10s burst and leaving the unit "failed".
+StartLimitIntervalSec=0
+
 [Service]
 Type=simple
 User=endpoint
@@ -20,11 +28,18 @@ ExecStart=/opt/attendance-ep/imgui-test
 Environment=DISPLAY=:0
 Environment=XAUTHORITY=/home/endpoint/.Xauthority
 
-# This is a crash safety net between update cycles, not how updates get
-# applied -- deploy/bin/update.py does its own explicit stop/swap/start
-# around an update and distinguishes that from a systemd-triggered
-# auto-restart via NRestarts (see update.py's health check).
-Restart=on-failure
+# Restart unconditionally, not just on-failure: main() exits with code 0
+# (a "clean" exit as far as systemd's concerned) if it ever receives an
+# SDL_QUIT/window-close event, which can happen if this races ahead of the
+# desktop session/X server actually being ready to accept connections right
+# after graphical.target is reached -- on-failure won't restart that, so
+# the unit was observed sitting inactive after a reboot until started by
+# hand. This is also a crash safety net between update cycles, not how
+# updates get applied -- deploy/bin/update.py does its own explicit
+# stop/swap/start around an update and distinguishes that from a
+# systemd-triggered auto-restart via NRestarts (see update.py's health
+# check), which tracks restarts under either policy the same way.
+Restart=always
 RestartSec=2
 
 [Install]

@@ -202,26 +202,34 @@ applies (device API key, user token, email/password, or the dev-token fallback f
 development) — see the comments in `.env.example` for details. If the API is unreachable or
 unconfigured, the app falls back to built-in offline demo data instead of failing.
 
-## NFC auto-checkin (RC522)
+## NFC auto-checkin (RC522, via rfid-py)
 
 Under `ATTENDANCE_API_KEY` (endpoint) auth, tapping a card on an RC522 reader auto-checks the
-student in via `POST /api/ClassSessions/auto-checkin` — no QR/code needed. See
-`ATTENDANCE_NFC_SPI_DEVICE` in `.env.example` and the wiring/protocol notes at the top of
-`nfc_reader.h`. Setup on the Pi:
+student in via `POST /api/ClassSessions/auto-checkin` — no QR/code needed.
 
-1. Wire the RC522: SDA/CS→SPI CE0 (pin 24), SCK→SPI SCLK (pin 23), MOSI→SPI MOSI (pin 19),
-   MISO→SPI MISO (pin 21), RST→3.3V (pin 17, *not* a GPIO — the app soft-resets the chip over
-   SPI instead), 3.3V→3.3V, GND→GND. IRQ is unused.
-2. Enable SPI: `sudo raspi-config` → Interface Options → SPI → Enable (or add
-   `dtparam=spi=on` to `/boot/firmware/config.txt` and reboot). This creates `/dev/spidev0.0`.
+The RC522 hardware is driven by a separate Python process (`rfid-py/rfid_server.py`, not part
+of this app's build), which owns the SPI bus and streams card taps to this app over a Unix
+domain socket at `/tmp/rfid.sock` (newline-delimited JSON, `{"event": "card", "uid": "<hex>",
+...}` per tap). This app is just a client of that socket — see `rfid_client.h` for the wire
+protocol and `ATTENDANCE_RFID_SOCKET` in `.env.example` to point at a different socket path.
+Splitting it out this way means the RC522 driver (anticollision, SPI timing, etc. — all the
+fiddly part) lives in one place and can be restarted/updated independently of this app.
+
+Setup on the Pi:
+
+1. Wire the RC522 (SDA/CS→SPI CE0, SCK→SPI SCLK, MOSI→SPI MOSI, MISO→SPI MISO, RST→3.3V,
+   3.3V→3.3V, GND→GND; IRQ unused) and enable SPI (`sudo raspi-config` → Interface Options →
+   SPI → Enable, or `dtparam=spi=on` in `/boot/firmware/config.txt` + reboot).
+2. Install and run `rfid-py/rfid_server.py` (needs the `mfrc522` Python package) as its own
+   always-on process — e.g. a systemd unit alongside `attendance-kiosk.service` — so it's
+   listening on `/tmp/rfid.sock` before this app starts.
 3. Register each card's UID with a student via the AttendanceApi (outside the scope of this
    app) — auto-checkin only resolves cards the server already knows about.
 
-Only single-size (4-byte) UIDs are supported, which covers the Mifare Classic cards/keyfobs
-bundled with most RC522 starter kits. If no reader responds on `/dev/spidev0.0` (unplugged, SPI
-disabled, wrong wiring, or just not present — e.g. running the app on a dev machine),
-auto-checkin silently stays disabled; check `journalctl -u attendance-kiosk` for
-`NfcCheckInWorker`/`NfcReader` log lines if a card tap isn't registering.
+If the Python server isn't running yet (or restarts), this app reconnects automatically and
+just shows no auto-checkin activity in the meantime; check `journalctl -u attendance-kiosk` for
+`RfidSocketClient` log lines if a card tap isn't registering, and the Python process's own
+output for whether it's seeing taps at all.
 
 ## Versioning
 

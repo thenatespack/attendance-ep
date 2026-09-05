@@ -31,7 +31,11 @@
 #ifdef __APPLE__
 #include <OpenGL/gl3.h>
 #else
-#include <GL/gl3.h>
+// SDL's own GL header picks the right system headers for whatever GL this
+// platform actually has, instead of guessing a specific one (e.g. GL/gl3.h
+// assumes desktop Core GL is available, which isn't a safe bet on Linux/
+// embedded GPU drivers).
+#include <SDL_opengl.h>
 #endif
 
 // Directory containing the running executable, so config files like .env
@@ -280,14 +284,26 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    // OpenGL 3.2 Core Profile on macOS
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, 0);
-    SDL_GL_SetAttribute(
-        SDL_GL_CONTEXT_PROFILE_MASK,
-        SDL_GL_CONTEXT_PROFILE_CORE
-    );
+#ifdef __APPLE__
+    // OpenGL 3.2 Core + GLSL 150: macOS refuses to give out anything above
+    // legacy GL 2.1 unless you request exactly a forward-compatible Core
+    // context like this.
+    const char* glsl_version = "#version 150";
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
+#else
+    // OpenGL 3.0 Core + GLSL 130: broadly supported across Linux/Mesa,
+    // including embedded GPU drivers (e.g. Raspberry Pi's V3D). Requesting
+    // exactly Core 3.2 like macOS needs is not guaranteed to be satisfiable
+    // there and can fail context creation outright (EGL_BAD_MATCH).
+    const char* glsl_version = "#version 130";
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, 0);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+#endif
 
     // Create window
     SDL_Window* window = SDL_CreateWindow(
@@ -338,7 +354,7 @@ int main(int argc, char* argv[])
 
     // Initialize ImGui SDL2 + OpenGL3 backends
     ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
-    ImGui_ImplOpenGL3_Init("#version 150");
+    ImGui_ImplOpenGL3_Init(glsl_version);
 
     bool running = true;
 

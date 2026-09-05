@@ -17,6 +17,17 @@ struct TotpInfo
     int secondsRemaining = 0;
 };
 
+struct AutoCheckInResult
+{
+    int classSessionId = -1;
+    int classId = -1;
+    std::string className;
+    int studentId = -1;
+    std::string studentFirstName;
+    std::string studentLastName;
+    bool alreadyCheckedIn = false;
+};
+
 // Talks to the AttendanceApi described in api-docs.json.
 class ApiClient
 {
@@ -72,6 +83,23 @@ public:
 
     // GET /api/ClassSessions/{id}/totp
     bool FetchTotp(int sessionId, TotpInfo& outTotp);
+
+    // POST /api/ClassSessions/auto-checkin (endpoint auth only): hands the
+    // server a scanned NFC card's raw UID, and it resolves both the student
+    // (registered card -> student) and the class session (the endpoint's
+    // room + current time) on its own -- unlike CheckInDto, there's no
+    // studentId/classSessionId for the caller to supply.
+    //
+    // On failure, returns false and fills outErrorCode/outErrorMessage from
+    // the server's `{ "error": "<Code>", "message": "<text>" }` body (known
+    // codes as of writing: NoClassRunning, ScheduleConflict,
+    // UnrecognizedBadge, NotEnrolled -- but callers should treat outErrorCode
+    // as open-ended and fall back to outErrorMessage for display). If the
+    // body couldn't be parsed at all (transport error, non-JSON response),
+    // outErrorCode is left empty and outErrorMessage holds a best-effort
+    // fallback string instead.
+    bool AutoCheckIn(const std::vector<uint8_t>& nfcUid, AutoCheckInResult& outResult,
+        std::string& outErrorCode, std::string& outErrorMessage);
 
 private:
     std::string baseUrl_;

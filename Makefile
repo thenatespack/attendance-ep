@@ -52,6 +52,7 @@ CPP_SRCS := \
     env.cpp \
     http_client.cpp \
     api_client.cpp \
+    nfc_reader.cpp \
     imgui/imgui.cpp \
     imgui/imgui_draw.cpp \
     imgui/imgui_widgets.cpp \

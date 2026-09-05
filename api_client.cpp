@@ -56,6 +56,46 @@ namespace
         return true;
     }
 
+    // AutoCheckInDto.nfcUid is `type: string, format: byte` -- OpenAPI's way
+    // of saying "base64-encoded bytes". nlohmann::json only knows how to
+    // serialize the string we hand it, so the encoding has to happen here.
+    std::string Base64Encode(const std::vector<uint8_t>& data)
+    {
+        static const char table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+        std::string out;
+        out.reserve(((data.size() + 2) / 3) * 4);
+
+        size_t i = 0;
+        for (; i + 3 <= data.size(); i += 3)
+        {
+            uint32_t n = (data[i] << 16) | (data[i + 1] << 8) | data[i + 2];
+            out += table[(n >> 18) & 0x3F];
+            out += table[(n >> 12) & 0x3F];
+            out += table[(n >> 6) & 0x3F];
+            out += table[n & 0x3F];
+        }
+
+        size_t remaining = data.size() - i;
+        if (remaining == 1)
+        {
+            uint32_t n = data[i] << 16;
+            out += table[(n >> 18) & 0x3F];
+            out += table[(n >> 12) & 0x3F];
+            out += "==";
+        }
+        else if (remaining == 2)
+        {
+            uint32_t n = (data[i] << 16) | (data[i + 1] << 8);
+            out += table[(n >> 18) & 0x3F];
+            out += table[(n >> 12) & 0x3F];
+            out += table[(n >> 6) & 0x3F];
+            out += "=";
+        }
+
+        return out;
+    }
+
     // Parses an array of ClassDto into display-ready schedule rows. Shared
     // by FetchSchedule and FetchScheduleForEndpoint (same DTO shape).
     bool ParseClassesToSchedule(const json& parsed, std::vector<ScheduleEntry>& outSchedule)
@@ -361,6 +401,61 @@ bool ApiClient::FetchTotp(int sessionId, TotpInfo& outTotp)
     catch (const json::exception& e)
     {
         printf("ApiClient: failed to parse totp response: %s\n", e.what());
+        return false;
+    }
+}
+
+bool ApiClient::AutoCheckIn(const std::vector<uint8_t>& nfcUid, AutoCheckInResult& outResult,
+    std::string& outErrorCode, std::string& outErrorMessage)
+{
+    json body;
+    body["nfcUid"] = Base64Encode(nfcUid);
+
+    HttpResponse response = HttpPostJson(Url("api/ClassSessions/auto-checkin"), body.dump(), AuthHeaders());
+    if (!response.ok)
+    {
+        outErrorCode.clear();
+        outErrorMessage.clear();
+
+        // A non-2xx status still means the transport succeeded, so the body
+        // is (expected to be) the `{ "error", "message" }` shape below --
+        // try that first and only fall back once it doesn't parse.
+        try
+        {
+            json parsed = json::parse(response.body);
+            outErrorCode = JsonToString(parsed.value("error", json("")));
+            outErrorMessage = JsonToString(parsed.value("message", json("")));
+        }
+        catch (const json::exception&)
+        {
+        }
+
+        if (outErrorMessage.empty())
+        {
+            outErrorMessage = !response.error.empty() ? response.error
+                : !response.body.empty() ? response.body
+                : "HTTP " + std::to_string(response.statusCode);
+        }
+        return false;
+    }
+
+    reachable_ = true;
+
+    try
+    {
+        json parsed = json::parse(response.body);
+        outResult.classSessionId = JsonToInt(parsed["classSessionId"]);
+        outResult.classId = JsonToInt(parsed["classId"]);
+        outResult.className = JsonToString(parsed["className"]);
+        outResult.studentId = JsonToInt(parsed["studentId"]);
+        outResult.studentFirstName = JsonToString(parsed["studentFirstName"]);
+        outResult.studentLastName = JsonToString(parsed["studentLastName"]);
+        outResult.alreadyCheckedIn = parsed.value("alreadyCheckedIn", false);
+        return true;
+    }
+    catch (const json::exception& e)
+    {
+        outErrorMessage = e.what();
         return false;
     }
 }

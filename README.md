@@ -202,6 +202,27 @@ applies (device API key, user token, email/password, or the dev-token fallback f
 development) — see the comments in `.env.example` for details. If the API is unreachable or
 unconfigured, the app falls back to built-in offline demo data instead of failing.
 
+## NFC auto-checkin (RC522)
+
+Under `ATTENDANCE_API_KEY` (endpoint) auth, tapping a card on an RC522 reader auto-checks the
+student in via `POST /api/ClassSessions/auto-checkin` — no QR/code needed. See
+`ATTENDANCE_NFC_SPI_DEVICE` in `.env.example` and the wiring/protocol notes at the top of
+`nfc_reader.h`. Setup on the Pi:
+
+1. Wire the RC522: SDA/CS→SPI CE0 (pin 24), SCK→SPI SCLK (pin 23), MOSI→SPI MOSI (pin 19),
+   MISO→SPI MISO (pin 21), RST→3.3V (pin 17, *not* a GPIO — the app soft-resets the chip over
+   SPI instead), 3.3V→3.3V, GND→GND. IRQ is unused.
+2. Enable SPI: `sudo raspi-config` → Interface Options → SPI → Enable (or add
+   `dtparam=spi=on` to `/boot/firmware/config.txt` and reboot). This creates `/dev/spidev0.0`.
+3. Register each card's UID with a student via the AttendanceApi (outside the scope of this
+   app) — auto-checkin only resolves cards the server already knows about.
+
+Only single-size (4-byte) UIDs are supported, which covers the Mifare Classic cards/keyfobs
+bundled with most RC522 starter kits. If no reader responds on `/dev/spidev0.0` (unplugged, SPI
+disabled, wrong wiring, or just not present — e.g. running the app on a dev machine),
+auto-checkin silently stays disabled; check `journalctl -u attendance-kiosk` for
+`NfcCheckInWorker`/`NfcReader` log lines if a card tap isn't registering.
+
 ## Versioning
 
 The header bar shows a version string built at compile time from two pieces (see the

@@ -1,0 +1,75 @@
+CXX := clang++
+CC  := clang
+
+CXXFLAGS := -std=c++17 -O2 -Wall
+CFLAGS   := -std=c11 -O2 -Wall
+
+BUILD_DIR := build
+TARGET    := imgui-test
+
+INCLUDES := -Iimgui -Iimgui/backends -Iqrcodegen -Ijson -I$(BUILD_DIR) $(shell sdl2-config --cflags)
+LDFLAGS  := $(shell sdl2-config --libs) -lcurl
+
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+    LDFLAGS += -framework OpenGL
+else
+    LDFLAGS += -lGL -lpthread
+endif
+
+# Version shown in the app's header bar: the VERSION file (bump by hand for
+# releases) plus the current commit and working-tree state, so every build
+# is traceable back to exactly the commit (and any local edits) it came from.
+VERSION_BASE := $(shell cat VERSION 2>/dev/null || echo 0.0.0)
+GIT_HASH     := $(shell git rev-parse --short=7 HEAD 2>/dev/null || echo nogit)
+GIT_DIRTY    := $(shell test -z "$$(git status --porcelain 2>/dev/null)" || echo -dirty)
+APP_VERSION  := $(VERSION_BASE)+$(GIT_HASH)$(GIT_DIRTY)
+
+CPP_SRCS := \
+    main.cpp \
+    env.cpp \
+    http_client.cpp \
+    api_client.cpp \
+    imgui/imgui.cpp \
+    imgui/imgui_draw.cpp \
+    imgui/imgui_widgets.cpp \
+    imgui/imgui_tables.cpp \
+    imgui/imgui_demo.cpp \
+    imgui/backends/imgui_impl_sdl2.cpp \
+    imgui/backends/imgui_impl_opengl3.cpp
+
+C_SRCS := qrcodegen/qrcodegen.c
+
+OBJS := $(patsubst %.cpp,$(BUILD_DIR)/%.o,$(CPP_SRCS)) $(patsubst %.c,$(BUILD_DIR)/%.o,$(C_SRCS))
+
+.PHONY: all run clean FORCE
+
+all: $(TARGET)
+
+$(TARGET): $(OBJS)
+	$(CXX) $(OBJS) $(LDFLAGS) -o $@
+
+$(BUILD_DIR)/%.o: %.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(BUILD_DIR)/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
+
+# Regenerated on every `make` invocation (FORCE), but only touched on disk
+# (and thus only triggers a main.o rebuild) when the version string actually
+# changes - i.e. on a new commit or a newly dirtied working tree.
+$(BUILD_DIR)/version.h: FORCE
+	@mkdir -p $(BUILD_DIR)
+	@echo '#define APP_VERSION "$(APP_VERSION)"' > $(BUILD_DIR)/version.h.tmp
+	@cmp -s $(BUILD_DIR)/version.h.tmp $(BUILD_DIR)/version.h 2>/dev/null || mv $(BUILD_DIR)/version.h.tmp $(BUILD_DIR)/version.h
+	@rm -f $(BUILD_DIR)/version.h.tmp
+
+$(BUILD_DIR)/main.o: $(BUILD_DIR)/version.h
+
+run: $(TARGET)
+	./$(TARGET)
+
+clean:
+	rm -rf $(BUILD_DIR) $(TARGET)

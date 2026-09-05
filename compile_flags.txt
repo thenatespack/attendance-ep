@@ -1,0 +1,9 @@
+-xc++
+-std=c++17
+-Iimgui
+-Iimgui/backends
+-Iqrcodegen
+-Ijson
+-Ibuild
+-I/opt/homebrew/include/SDL2
+-D_THREAD_SAFE

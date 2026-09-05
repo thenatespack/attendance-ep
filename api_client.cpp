@@ -294,20 +294,25 @@ bool ApiClient::ResolveClassSessionId(int& outSessionId, int roomId)
 
     reachable_ = true;
 
-    int classId = -1;
     try
     {
         json classes = json::parse(classesResponse.body);
         if (!classes.is_array() || classes.empty())
             return false;
-        classId = JsonToInt(classes[0]["id"]);
+
+        // Not every class has a session yet (e.g. none created for today) —
+        // try each until one resolves instead of giving up after the first.
+        for (const json& cls : classes)
+        {
+            if (ResolveSessionIdForClass(JsonToInt(cls["id"]), outSessionId))
+                return true;
+        }
+        return false;
     }
     catch (const json::exception&)
     {
         return false;
     }
-
-    return ResolveSessionIdForClass(classId, outSessionId);
 }
 
 bool ApiClient::ResolveSessionIdForClass(int classId, int& outSessionId)

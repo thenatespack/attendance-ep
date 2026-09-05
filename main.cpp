@@ -236,10 +236,18 @@ int main(int argc, char* argv[])
         // claim, so no ATTENDANCE_ROOM/ResolveRoomId lookup is needed here.
         if (apiClient.FetchScheduleForEndpoint(schedule) && !schedule.empty())
         {
-            useRemoteTotp = apiClient.ResolveSessionIdForClass(schedule[0].classId, classSessionId);
+            // Not every class has a session yet (e.g. none created for
+            // today) — try each until one resolves, not just the first.
+            for (const ScheduleEntry& entry : schedule)
+            {
+                if (apiClient.ResolveSessionIdForClass(entry.classId, classSessionId))
+                {
+                    useRemoteTotp = true;
+                    break;
+                }
+            }
             if (!useRemoteTotp)
-                printf("Attendance API: this endpoint key can't resolve a class session yet "
-                       "(GET /api/ClassSessions may not accept endpoint auth); showing schedule only.\n");
+                printf("Attendance API: none of this room's classes have a session yet; showing schedule only.\n");
         }
         else
         {

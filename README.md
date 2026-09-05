@@ -14,7 +14,7 @@ The screen shows three things and nothing is clickable:
 - A C++17 compiler (Apple clang on macOS, GCC on Linux — whatever `make` finds by default)
 - [SDL2](https://www.libsdl.org/)
 - [libcurl](https://curl.se/libcurl/) (used for the AttendanceApi calls)
-- OpenGL dev headers (system-provided on macOS; a `libgl`/`mesa` dev package on Linux)
+- OpenGL dev headers: desktop GL on macOS, **GLES2** on Linux (see note below)
 
 macOS (Homebrew):
 
@@ -25,14 +25,22 @@ brew install sdl2 curl
 Debian/Ubuntu:
 
 ```sh
-sudo apt install build-essential libsdl2-dev libcurl4-openssl-dev libgl-dev pkg-config
+sudo apt install build-essential libsdl2-dev libcurl4-openssl-dev libgles2-mesa-dev pkg-config
 ```
 
 Fedora:
 
 ```sh
-sudo dnf install gcc-c++ SDL2-devel libcurl-devel mesa-libGL-devel pkgconf-pkg-config
+sudo dnf install gcc-c++ SDL2-devel libcurl-devel mesa-libGLES-devel pkgconf-pkg-config
 ```
+
+> **Why GLES2 on Linux, not desktop GL?** This app targets Raspberry Pi as a real deployment
+> device, and its Mesa V3D driver only reliably hands out GLES-capable EGL configs — requesting
+> any desktop OpenGL Core context (even as low as 3.0) fails with `EGL_BAD_MATCH`. `main.cpp`
+> requests a GLES2 context on all non-Apple platforms accordingly, and the Makefile links
+> `-lGLESv2` with `-DIMGUI_IMPL_OPENGL_ES2` there. If you're targeting a desktop Linux box with
+> a proper desktop GL driver instead, you can switch this back — see the `#ifdef __APPLE__`
+> block in `main.cpp` and the `ifeq ($(UNAME_S),Darwin)` block in `Makefile`.
 
 Dear ImGui (`imgui/`), the QR code generator (`qrcodegen/`,
 [Nayuki's QR Code generator library](https://github.com/nayuki/QR-Code-generator), MIT licensed),

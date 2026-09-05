@@ -32,7 +32,11 @@ UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
     LDFLAGS += -framework OpenGL
 else
-    LDFLAGS += -lGL -lpthread
+    # GLES2, not desktop GL: see the comment above the SDL_GL_SetAttribute
+    # calls in main.cpp for why (Raspberry Pi's Mesa V3D driver only
+    # reliably hands out GLES-capable EGL configs).
+    CXXFLAGS += -DIMGUI_IMPL_OPENGL_ES2
+    LDFLAGS  += -lGLESv2 -lpthread
 endif
 
 # Version shown in the app's header bar: the VERSION file (bump by hand for

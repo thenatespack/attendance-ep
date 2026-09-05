@@ -31,11 +31,12 @@
 #ifdef __APPLE__
 #include <OpenGL/gl3.h>
 #else
-// SDL's own GL header picks the right system headers for whatever GL this
-// platform actually has, instead of guessing a specific one (e.g. GL/gl3.h
-// assumes desktop Core GL is available, which isn't a safe bet on Linux/
-// embedded GPU drivers).
-#include <SDL_opengl.h>
+// Raspberry Pi's Mesa V3D driver hands out EGL configs that only support
+// GLES rendering, not desktop GL — requesting a desktop Core context (even
+// as low as 3.0) fails EGL config matching outright (EGL_BAD_MATCH).
+// GLES2 is what's reliably available there. IMGUI_IMPL_OPENGL_ES2 (set in
+// Makefile) switches imgui's OpenGL3 backend to its GLES2-compatible path.
+#include <SDL_opengles2.h>
 #endif
 
 // Directory containing the running executable, so config files like .env
@@ -294,14 +295,14 @@ int main(int argc, char* argv[])
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
 #else
-    // OpenGL 3.0 Core + GLSL 130: broadly supported across Linux/Mesa,
-    // including embedded GPU drivers (e.g. Raspberry Pi's V3D). Requesting
-    // exactly Core 3.2 like macOS needs is not guaranteed to be satisfiable
-    // there and can fail context creation outright (EGL_BAD_MATCH).
-    const char* glsl_version = "#version 130";
+    // OpenGL ES 2.0 + GLSL ES 100: Raspberry Pi's Mesa V3D driver only
+    // reliably hands out GLES-capable EGL configs, not desktop-GL-capable
+    // ones — requesting any desktop Core profile (3.2, 3.0, ...) fails EGL
+    // config matching outright (EGL_BAD_MATCH), regardless of version.
+    const char* glsl_version = "#version 100";
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, 0);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
 #endif
 

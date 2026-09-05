@@ -1,0 +1,31 @@
+[Unit]
+Description=Attendance EP kiosk display
+After=graphical.target
+Wants=graphical.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/opt/attendance-ep
+ExecStart=/opt/attendance-ep/imgui-test
+
+# --- GUI environment: VERIFY on the actual Pi before relying on these ---
+# Assumes Raspberry Pi OS Bookworm with desktop autologin as "pi" on
+# DISPLAY :0 (X11 or XWayland). If the Pi uses a different user, a
+# Wayland-only compositor with no XWayland, or a different DISPLAY number,
+# these must be adjusted -- otherwise SDL_CreateWindow fails to find a
+# display and the service crash-loops. Check with `echo $DISPLAY` in the
+# Pi's actual desktop session.
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/pi/.Xauthority
+
+# This is a crash safety net between update cycles, not how updates get
+# applied -- deploy/bin/update.py does its own explicit stop/swap/start
+# around an update and distinguishes that from a systemd-triggered
+# auto-restart via NRestarts (see update.py's health check).
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical.target

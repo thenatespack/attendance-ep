@@ -64,7 +64,7 @@ C_SRCS := qrcodegen/qrcodegen.c
 
 OBJS := $(patsubst %.cpp,$(BUILD_DIR)/%.o,$(CPP_SRCS)) $(patsubst %.c,$(BUILD_DIR)/%.o,$(C_SRCS))
 
-.PHONY: all run clean linux-arm64 FORCE
+.PHONY: all run clean linux-arm64 linux-amd64 linux-all FORCE
 
 all: $(TARGET)
 
@@ -107,7 +107,19 @@ clean:
 	rm -rf $(BUILD_DIR) $(TARGET)
 
 # Cross-builds a Linux/aarch64 binary (e.g. Raspberry Pi OS 64-bit) via
-# Docker, dropping the result at dist/imgui-test. Requires Docker with
-# buildx (Docker Desktop and OrbStack both include it).
+# Docker, dropping the result at dist/imgui-test-linux-arm64. Requires
+# Docker with buildx (Docker Desktop and OrbStack both include it).
 linux-arm64:
 	docker buildx build --platform linux/arm64 -f Dockerfile.linux -o type=local,dest=./dist .
+	mv dist/imgui-test dist/imgui-test-linux-arm64
+
+# Same, for a generic x86_64 Linux box. On Apple Silicon this runs under
+# QEMU emulation (slower than linux-arm64's native build, but still works).
+linux-amd64:
+	docker buildx build --platform linux/amd64 -f Dockerfile.linux -o type=local,dest=./dist .
+	mv dist/imgui-test dist/imgui-test-linux-amd64
+
+# Both binaries, named to match what CI's release workflow produces —
+# handy for cutting a release (or a beta prerelease) locally with
+# `gh release create` instead of spending CI minutes. See README.
+linux-all: linux-arm64 linux-amd64

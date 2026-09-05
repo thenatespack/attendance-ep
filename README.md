@@ -58,24 +58,25 @@ This compiles everything into object files and links the `imgui-test` binary.
 ## Cross-building for Linux (e.g. Raspberry Pi) from macOS
 
 ```sh
-make linux-arm64
+make linux-arm64   # -> dist/imgui-test-linux-arm64
+make linux-amd64   # -> dist/imgui-test-linux-amd64
+make linux-all     # both
 ```
 
-Builds inside a Debian Bookworm container via Docker buildx and drops the result at
-`dist/imgui-test` — a native `aarch64` ELF binary. Debian Bookworm is what Raspberry Pi OS
-(64-bit) is built on, so it links against the same SDL2/libcurl/libGL SONAMEs already on the
-device; just copy `dist/imgui-test` over and run it alongside your `.env`.
+Builds inside a Debian Bookworm container via Docker buildx. Debian Bookworm is what Raspberry
+Pi OS (64-bit) is built on, so it links against the same SDL2/libcurl/libGL SONAMEs already on
+the device; just copy the binary over and run it alongside your `.env`.
 
 Requires Docker (with buildx, bundled in Docker Desktop and OrbStack) running locally. On
-Apple Silicon this runs natively — no QEMU emulation needed, since the host and target
-architecture match. For a 32-bit Raspberry Pi OS or a generic x86_64 box, edit the
-`--platform` flag in the `linux-arm64` target (or `Dockerfile.linux`'s comment) to
-`linux/arm/v7` or `linux/amd64` respectively.
+Apple Silicon, `linux-arm64` runs natively (no QEMU) while `linux-amd64` runs emulated (slower);
+on an x86_64 host it's the other way around. For a 32-bit Raspberry Pi OS, edit the
+`--platform` flag in the Makefile target (or `Dockerfile.linux`'s comment) to `linux/arm/v7`.
 
 ## Releases (prebuilt binaries)
 
-Pushing a version tag builds Linux `arm64` and `amd64` binaries in CI (`.github/workflows/release.yml`)
-and publishes them as a GitHub Release — no need to clone/build on the Pi at all:
+Pushing a version tag whose commit is on `main` builds Linux `arm64` and `amd64` binaries in CI
+(`.github/workflows/release.yml`) and publishes them as a GitHub Release — no need to
+clone/build on the Pi at all:
 
 ```sh
 git tag v1.0.1
@@ -89,9 +90,87 @@ curl -L -o imgui-test https://github.com/thenatespack/attendance-ep/releases/lat
 chmod +x imgui-test
 ```
 
-`releases/latest/download/...` always points at the newest release, so that URL never changes.
-You can also trigger the same build without cutting a release from the Actions tab
-(`workflow_dispatch`) — that run's binaries show up as workflow artifacts instead.
+`releases/latest/download/...` always points at the newest (non-prerelease) release, so that
+URL never changes. You can also trigger the same build without cutting a release from the
+Actions tab (`workflow_dispatch`) — that run's binaries show up as workflow artifacts instead.
+
+Tags pushed from a commit that isn't on `main` are intentionally skipped by CI (see the `gate`
+job in the workflow) so they don't spend Actions minutes — use a local/beta release instead.
+
+### Local / beta releases
+
+To cut a release without CI at all — e.g. a beta build from a feature branch — build both
+binaries locally and publish them yourself with the [`gh` CLI](https://cli.github.com/):
+
+```sh
+make linux-all
+git tag v1.1.0-beta.1
+git push origin v1.1.0-beta.1
+gh release create v1.1.0-beta.1 \
+    dist/imgui-test-linux-arm64 dist/imgui-test-linux-amd64 \
+    --prerelease --generate-notes
+```
+
+Drop `--prerelease` for a real release cut this way instead of through CI. Either way this
+never touches GitHub Actions, so it costs nothing beyond the Docker build time on your laptop.
+
+## Self-updating deployment on the Pi
+
+The Pi can keep itself up to date on its own: a systemd timer checks GitHub every 30 minutes,
+and if the latest release differs from what's installed, downloads the matching binary, swaps
+it in, and restarts the app. If the new binary doesn't survive a short grace period after
+restart, it's automatically rolled back to the previous one — see `deploy/bin/update.py` for
+the full logic. Because `GET .../releases/latest` excludes prereleases by definition, a beta
+release published with `--prerelease` (above) never reaches the kiosk this way.
+
+One-time setup on a fresh Pi:
+
+```sh
+sudo mkdir -p /opt/attendance-ep/bin /opt/attendance-ep/state
+
+# Place the initial binary (matching this Pi's arch) and your .env:
+sudo cp imgui-test-linux-arm64 /opt/attendance-ep/imgui-test
+sudo chmod +x /opt/attendance-ep/imgui-test
+sudo cp .env /opt/attendance-ep/.env
+
+# Seed the installed-version marker with the tag that matches the binary
+# above, so the first check doesn't treat it as an update to apply:
+echo "v1.0.1" | sudo tee /opt/attendance-ep/state/installed_version
+
+# Install the updater script and systemd units:
+sudo cp deploy/bin/update.py /opt/attendance-ep/bin/update.py
+sudo chmod +x /opt/attendance-ep/bin/update.py
+sudo cp deploy/systemd/attendance-kiosk.service /etc/systemd/system/
+sudo cp deploy/systemd/attendance-update.service /etc/systemd/system/
+sudo cp deploy/systemd/attendance-update.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+
+sudo systemctl enable --now attendance-kiosk.service
+sudo systemctl enable --now attendance-update.timer
+```
+
+> **Verify the GUI environment before walking away.** `attendance-kiosk.service` assumes
+> Raspberry Pi OS Bookworm with desktop autologin as user `pi` on `DISPLAY :0` (see the
+> `User=`/`Environment=DISPLAY=`/`Environment=XAUTHORITY=` lines in
+> `deploy/systemd/attendance-kiosk.service`). If your Pi autologs in as a different user, runs a
+> Wayland-only compositor without XWayland, or uses a different display number, adjust those
+> lines — otherwise SDL fails to find a display and the service crash-loops. Check with `echo
+> $DISPLAY` in the Pi's actual desktop session, then `sudo systemctl daemon-reload && sudo
+> systemctl restart attendance-kiosk` after editing.
+
+Operator commands:
+
+```sh
+systemctl status attendance-kiosk          # is the app running?
+systemctl status attendance-update.timer   # is the update timer scheduled?
+journalctl -u attendance-kiosk -f          # live app logs
+journalctl -u attendance-update -e         # the last update check's result
+sudo systemctl start attendance-update.service   # force an immediate check
+cat /opt/attendance-ep/state/installed_version   # what's currently installed
+```
+
+This trusts anyone with release-publish permission on the repo, protected only by HTTPS —
+there's no separate binary-signing/checksum infrastructure on top of that.
 
 ## Run
 

@@ -1,0 +1,9 @@
+[Unit]
+Description=Check for and apply attendance-ep kiosk updates
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/python3 /opt/attendance-ep/bin/update.py

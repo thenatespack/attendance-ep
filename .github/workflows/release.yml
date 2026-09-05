@@ -1,10 +1,14 @@
 name: Release
 
 # Push a tag like v1.0.1 to build + publish a GitHub Release with the Linux
-# binaries attached. `workflow_dispatch` lets you run the same build on
-# demand (e.g. from the Actions tab) without cutting a release, useful for
-# testing the pipeline itself - those runs just produce downloadable
-# workflow artifacts instead of a Release.
+# binaries attached — but only for tags whose commit is on main, so pushing
+# a tag from a feature/beta branch doesn't spend CI minutes. Cut a release
+# (or prerelease) from another branch by building locally instead
+# (`make linux-all` + `gh release create`) — see README: "Local / beta
+# releases". `workflow_dispatch` lets you run the same build on demand (e.g.
+# from the Actions tab) regardless of branch, useful for testing the
+# pipeline itself - those runs just produce downloadable workflow artifacts
+# instead of a Release.
 on:
   push:
     tags:
@@ -15,7 +19,29 @@ permissions:
   contents: write
 
 jobs:
+  # Cheap check that runs before the expensive Docker cross-build matrix,
+  # so a tag pushed from a non-main branch bails out here instead of paying
+  # for the full build.
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      on_main: ${{ steps.check.outputs.on_main }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: check
+        run: |
+          git fetch origin main --depth=1
+          if git merge-base --is-ancestor "${{ github.sha }}" origin/main; then
+            echo "on_main=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "on_main=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
+    needs: gate
+    if: github.event_name == 'workflow_dispatch' || needs.gate.outputs.on_main == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -41,9 +67,9 @@ jobs:
           path: dist/imgui-test-linux-${{ matrix.arch }}
 
   release:
-    needs: build
+    needs: [gate, build]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') && needs.gate.outputs.on_main == 'true'
     steps:
       - uses: actions/download-artifact@v4
         with:

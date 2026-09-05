@@ -13,6 +13,8 @@
 #include <memory>
 #include <climits>
 #include <algorithm>
+#include <cctype>
+#include <strings.h>
 
 #include "imgui.h"
 #include "backends/imgui_impl_sdl2.h"
@@ -106,6 +108,69 @@ static void RegenerateQr(const std::string& text, uint8_t tempBuffer[], uint8_t 
         qrcodegen_Mask_AUTO,
         true
     );
+}
+
+// Parses a ScheduleEntry::time string ("HH:MM - HH:MM") into minutes since
+// midnight. Returns false for placeholder values like "TBD".
+static bool ParseTimeRangeMinutes(const std::string& range, int& outStartMinutes, int& outEndMinutes)
+{
+    int startHour, startMin, endHour, endMin;
+    if (sscanf(range.c_str(), "%d:%d - %d:%d", &startHour, &startMin, &endHour, &endMin) != 4)
+        return false;
+    outStartMinutes = startHour * 60 + startMin;
+    outEndMinutes = endHour * 60 + endMin;
+    return true;
+}
+
+// Normally the wall-clock time, but overridable via ATTENDANCE_DEBUG_TIME
+// ("HH:MM") so the current-class highlight can be tested without waiting
+// for a real class to start.
+static int CurrentMinutesOfDay()
+{
+    static const std::string debugTime = dotenv::Get("ATTENDANCE_DEBUG_TIME");
+    int debugHour, debugMin;
+    if (!debugTime.empty() && sscanf(debugTime.c_str(), "%d:%d", &debugHour, &debugMin) == 2)
+        return debugHour * 60 + debugMin;
+
+    std::time_t t = std::time(nullptr);
+    std::tm local;
+    localtime_r(&t, &local);
+    return local.tm_hour * 60 + local.tm_min;
+}
+
+// Looks for "Sprint <N>" in a class name (e.g. "BIT370 ... (Sprint 2)") and
+// returns N, or -1 if the name doesn't mention a sprint at all.
+static int ExtractSprintNumber(const std::string& course)
+{
+    for (size_t i = 0; i + 6 <= course.size(); i++)
+    {
+        if (strncasecmp(course.c_str() + i, "Sprint", 6) == 0)
+        {
+            size_t j = i + 6;
+            while (j < course.size() && isspace((unsigned char)course[j]))
+                j++;
+            if (j < course.size() && isdigit((unsigned char)course[j]))
+                return atoi(course.c_str() + j);
+        }
+    }
+    return -1;
+}
+
+// Drops schedule rows for other sprints, per ATTENDANCE_SPRINT ("1" or "2").
+// A class whose name doesn't mention "Sprint" at all is left in either way.
+static void FilterScheduleBySprint(std::vector<ScheduleEntry>& schedule)
+{
+    std::string sprintFilter = dotenv::Get("ATTENDANCE_SPRINT");
+    if (sprintFilter.empty())
+        return;
+
+    int wantSprint = atoi(sprintFilter.c_str());
+    schedule.erase(
+        std::remove_if(schedule.begin(), schedule.end(), [wantSprint](const ScheduleEntry& entry) {
+            int sprint = ExtractSprintNumber(entry.course);
+            return sprint != -1 && sprint != wantSprint;
+        }),
+        schedule.end());
 }
 
 // Draws a QR code (with quiet zone) at originScreenPos, each module moduleSize pixels wide.
@@ -274,6 +339,8 @@ int main(int argc, char* argv[])
 
         useRemoteTotp = apiClient.ResolveClassSessionId(classSessionId, roomId);
     }
+
+    FilterScheduleBySprint(schedule);
 
     if (!apiClient.IsReachable())
         printf("Attendance API at %s is unreachable; showing offline demo data.\n", apiUrl.c_str());
@@ -497,17 +564,44 @@ int main(int argc, char* argv[])
         const float scheduleFontScale = 1.3f;
         const float timeColumnWidth = 160.0f * scheduleFontScale;
 
+        const int nowMinutes = CurrentMinutesOfDay();
+        ImDrawList* scheduleDrawList = ImGui::GetWindowDrawList();
+        ImDrawListSplitter scheduleSplitter;
+        scheduleSplitter.Split(scheduleDrawList, 2);
+
         ImGui::SetWindowFontScale(scheduleFontScale);
         for (const ScheduleEntry& item : schedule)
         {
+            int startMinutes, endMinutes;
+            const bool isCurrent = ParseTimeRangeMinutes(item.time, startMinutes, endMinutes)
+                && nowMinutes >= startMinutes && nowMinutes < endMinutes;
+
+            const ImVec2 rowStart = ImGui::GetCursorScreenPos();
+            const float rowWidth = ImGui::GetContentRegionAvail().x;
+
+            scheduleSplitter.SetCurrentChannel(scheduleDrawList, 1);
+            if (isCurrent)
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 1.0f, 0.7f, 1.0f));
+
             ImGui::TextUnformatted(item.time.c_str());
             ImGui::SameLine(timeColumnWidth);
             ImGui::TextWrapped("%s", item.course.c_str());
 
+            if (isCurrent)
+                ImGui::PopStyleColor();
+
             ImGui::Spacing();
             ImGui::Spacing();
             ImGui::Spacing();
+
+            if (isCurrent)
+            {
+                const ImVec2 rowEnd(rowStart.x + rowWidth, ImGui::GetCursorScreenPos().y);
+                scheduleSplitter.SetCurrentChannel(scheduleDrawList, 0);
+                scheduleDrawList->AddRectFilled(rowStart, rowEnd, IM_COL32(46, 125, 90, 120), 4.0f);
+            }
         }
+        scheduleSplitter.Merge(scheduleDrawList);
         ImGui::SetWindowFontScale(1.0f);
 
         ImGui::EndChild();

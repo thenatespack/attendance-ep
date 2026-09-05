@@ -78,6 +78,16 @@ static std::string GenerateAttendanceCode()
     return code;
 }
 
+// Builds the check-in deep link the QR code encodes. Falls back to the bare
+// code (old behavior) when there's no frontend URL configured or no real
+// session to check into (offline demo mode).
+static std::string BuildCheckInQrText(const std::string& frontendUrl, int classSessionId, const std::string& code)
+{
+    if (frontendUrl.empty() || classSessionId < 0)
+        return code;
+    return frontendUrl + "checkin?class=" + std::to_string(classSessionId) + "&code=" + code;
+}
+
 static void RegenerateQr(const std::string& text, uint8_t tempBuffer[], uint8_t qrcode[])
 {
     qrcodegen_encodeText(
@@ -197,6 +207,8 @@ private:
 
 int main(int argc, char* argv[])
 {
+    setvbuf(stdout, nullptr, _IOLBF, 0); // flush log lines promptly, e.g. under `tail -f`
+
     srand((unsigned int)time(nullptr));
 
     dotenv::Load(GetExecutableDir(argv[0]) + "/.env");
@@ -206,6 +218,12 @@ int main(int argc, char* argv[])
     std::string apiUrl = dotenv::Get("ATTENDANCE_API_URL", "http://localhost:5261/");
     ApiClient apiClient(apiUrl);
     apiClient.Authenticate();
+
+    // The QR code encodes a deep link into the student-facing check-in page,
+    // not just the bare code, so a phone camera can jump straight there.
+    std::string frontendUrl = dotenv::Get("ATTENDANCE_FRONTEND_URL");
+    if (!frontendUrl.empty() && frontendUrl.back() != '/')
+        frontendUrl += '/';
 
     std::string configuredRoom = dotenv::Get("ATTENDANCE_ROOM");
     std::vector<ScheduleEntry> schedule;
@@ -334,7 +352,7 @@ int main(int argc, char* argv[])
     std::string currentCode = "......";
     uint8_t qrTempBuffer[qrcodegen_BUFFER_LEN_MAX];
     uint8_t qrCode[qrcodegen_BUFFER_LEN_MAX];
-    RegenerateQr(currentCode, qrTempBuffer, qrCode);
+    RegenerateQr(BuildCheckInQrText(frontendUrl, classSessionId, currentCode), qrTempBuffer, qrCode);
 
     while (running)
     {
@@ -373,7 +391,7 @@ int main(int argc, char* argv[])
                 if (latestCode != currentCode)
                 {
                     currentCode = latestCode;
-                    RegenerateQr(currentCode, qrTempBuffer, qrCode);
+                    RegenerateQr(BuildCheckInQrText(frontendUrl, classSessionId, currentCode), qrTempBuffer, qrCode);
                 }
 
                 secondsRemaining = latestSecondsRemaining;
@@ -398,7 +416,7 @@ int main(int argc, char* argv[])
             {
                 lastCycleIndex = cycleIndex;
                 currentCode = GenerateAttendanceCode();
-                RegenerateQr(currentCode, qrTempBuffer, qrCode);
+                RegenerateQr(BuildCheckInQrText(frontendUrl, classSessionId, currentCode), qrTempBuffer, qrCode);
             }
         }
 

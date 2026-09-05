@@ -45,13 +45,29 @@ or just run the binary directly after building:
 make clean
 ```
 
-Removes the binary and all object files.
+Removes the `build/` directory and the binary.
+
+## Configuration
+
+Copy `.env.example` to `.env` and fill in the AttendanceApi's URL plus whichever auth method
+applies (device API key, user token, email/password, or the dev-token fallback for local
+development) — see the comments in `.env.example` for details. If the API is unreachable or
+unconfigured, the app falls back to built-in offline demo data instead of failing.
+
+## Versioning
+
+The header bar shows a version string built at compile time from two pieces (see the
+`APP_VERSION` rule in `Makefile`):
+
+- `VERSION` — a plain semver string, bumped by hand for releases.
+- The current commit's short hash (and a `-dirty` suffix if the working tree has uncommitted
+  changes), read from git.
+
+So every build is traceable back to the exact commit (and any local edits) it came from, e.g.
+`1.0.0+68ef60b` or `1.0.0+68ef60b-dirty`. This is regenerated on every `make` invocation, and
+only triggers a rebuild of `main.cpp` when the string actually changes.
 
 ## Notes
 
-- The schedule shown is placeholder sample data hardcoded in `main.cpp` (`kSchedule`). Swap it
-  for a real data source (file/API) when one is available.
-- The check-in code is a random 6-character code (ambiguous characters like `0`/`O`, `1`/`I`
-  excluded) regenerated every 10 seconds, encoded directly into the QR code.
 - `compile_flags.txt` is provided so editors using `clangd` resolve the same include paths as
   the Makefile.

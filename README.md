@@ -150,13 +150,15 @@ sudo systemctl enable --now attendance-update.timer
 ```
 
 > **Verify the GUI environment before walking away.** `attendance-kiosk.service` assumes
-> Raspberry Pi OS Bookworm with desktop autologin as user `pi` on `DISPLAY :0` (see the
+> desktop autologin as user `endpoint` on `DISPLAY :0` (see the
 > `User=`/`Environment=DISPLAY=`/`Environment=XAUTHORITY=` lines in
 > `deploy/systemd/attendance-kiosk.service`). If your Pi autologs in as a different user, runs a
 > Wayland-only compositor without XWayland, or uses a different display number, adjust those
-> lines — otherwise SDL fails to find a display and the service crash-loops. Check with `echo
-> $DISPLAY` in the Pi's actual desktop session, then `sudo systemctl daemon-reload && sudo
-> systemctl restart attendance-kiosk` after editing.
+> lines — otherwise SDL fails to find a display and the service crash-loops (systemd logs this
+> as `Failed to determine user credentials: No such process` if the `User=` name doesn't exist
+> at all). Check the logged-in username with `whoami` and the display with `echo $DISPLAY` in
+> the Pi's actual desktop session, then `sudo systemctl daemon-reload && sudo systemctl restart
+> attendance-kiosk` after editing.
 
 Operator commands:
 

@@ -138,6 +138,37 @@ static int CurrentMinutesOfDay()
     return local.tm_hour * 60 + local.tm_min;
 }
 
+// Today's calendar date for the footer, e.g. "Fri, Sep 4". Always the real
+// date -- ATTENDANCE_DEBUG_TIME (see CurrentMinutesOfDay) only overrides
+// the time-of-day, not the date.
+static std::string FormatFooterDate()
+{
+    std::time_t t = std::time(nullptr);
+    std::tm local;
+    localtime_r(&t, &local);
+    char buf[32];
+    strftime(buf, sizeof(buf), "%a, %b %d", &local);
+    return buf;
+}
+
+// The clock shown in the footer, e.g. "2:05 PM". Built from
+// CurrentMinutesOfDay() so it reflects ATTENDANCE_DEBUG_TIME when set --
+// handy for confirming the footer and the current-class highlight agree
+// on what time it "is".
+static std::string FormatFooterTime()
+{
+    int minutes = CurrentMinutesOfDay();
+    int hour24 = (minutes / 60) % 24;
+    int minute = minutes % 60;
+    const char* suffix = hour24 < 12 ? "AM" : "PM";
+    int hour12 = hour24 % 12;
+    if (hour12 == 0)
+        hour12 = 12;
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%d:%02d %s", hour12, minute, suffix);
+    return buf;
+}
+
 // Looks for "Sprint <N>" in a class name (e.g. "BIT370 ... (Sprint 2)") and
 // returns N, or -1 if the name doesn't mention a sprint at all.
 static int ExtractSprintNumber(const std::string& course)
@@ -342,6 +373,16 @@ int main(int argc, char* argv[])
 
     FilterScheduleBySprint(schedule);
 
+    // Room label for the footer bar: prefer the configured room (works
+    // under endpoint auth too, since ATTENDANCE_ROOM is just read from the
+    // environment regardless of auth mode), falling back to whatever room
+    // the fetched schedule says.
+    std::string roomLabel = configuredRoom;
+    if (roomLabel.empty() && !schedule.empty() && schedule[0].room != "No room")
+        roomLabel = schedule[0].room;
+    if (roomLabel.empty())
+        roomLabel = "—";
+
     if (!apiClient.IsReachable())
         printf("Attendance API at %s is unreachable; showing offline demo data.\n", apiUrl.c_str());
 
@@ -391,6 +432,10 @@ int main(int argc, char* argv[])
         SDL_Quit();
         return 1;
     }
+
+    // Nothing on screen is clickable (see README) -- hide the mouse cursor
+    // so it doesn't sit visibly over the kiosk display.
+    SDL_ShowCursor(SDL_DISABLE);
 
     // Create OpenGL context
     SDL_GLContext gl_context = SDL_GL_CreateContext(window);
@@ -548,7 +593,11 @@ int main(int argc, char* argv[])
         ImGui::Separator();
         ImGui::Spacing();
 
-        const float panelHeight = ImGui::GetContentRegionAvail().y;
+        // Reserve room at the bottom for the footer bar (separator +
+        // spacing + one text line) before sizing the two main panels, since
+        // the footer is drawn after them but must not be squeezed out.
+        const float footerHeight = ImGui::GetTextLineHeightWithSpacing() + ImGui::GetStyle().ItemSpacing.y + 8.0f;
+        const float panelHeight = ImGui::GetContentRegionAvail().y - footerHeight;
 
         // Left panel: today's schedule.
         ImGui::BeginChild("SchedulePanel", ImVec2(ImGui::GetContentRegionAvail().x * 0.55f, panelHeight), true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoInputs);
@@ -683,6 +732,20 @@ int main(int argc, char* argv[])
         ImGui::ProgressBar(fraction, ImVec2(-FLT_MIN, progressBarHeight), overlay);
 
         ImGui::EndChild();
+
+        // Footer bar: date + time on the left, room on the right.
+        ImGui::Separator();
+        {
+            std::string leftLabel = FormatFooterDate() + "   " + FormatFooterTime();
+            std::string rightLabel = "Room " + roomLabel;
+
+            ImGui::TextUnformatted(leftLabel.c_str());
+            ImGui::SameLine();
+
+            float rightWidth = ImGui::CalcTextSize(rightLabel.c_str()).x;
+            ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - rightWidth);
+            ImGui::TextUnformatted(rightLabel.c_str());
+        }
 
         ImGui::End();
 

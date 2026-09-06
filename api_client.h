@@ -98,8 +98,16 @@ public:
     // body couldn't be parsed at all (transport error, non-JSON response),
     // outErrorCode is left empty and outErrorMessage holds a best-effort
     // fallback string instead.
+    //
+    // The server also includes studentFirstName/studentLastName in some
+    // error bodies -- the card was recognized, it just couldn't check in
+    // (e.g. NoClassRunning, NotEnrolled) -- filled into
+    // outErrorStudentFirstName/outErrorStudentLastName when present. They're
+    // left empty for errors where the server has no identity to give (e.g.
+    // UnrecognizedBadge) or on the unparsed-body fallback above.
     bool AutoCheckIn(const std::vector<uint8_t>& nfcUid, AutoCheckInResult& outResult,
-        std::string& outErrorCode, std::string& outErrorMessage);
+        std::string& outErrorCode, std::string& outErrorMessage,
+        std::string& outErrorStudentFirstName, std::string& outErrorStudentLastName);
 
 private:
     std::string baseUrl_;

@@ -171,41 +171,6 @@ static std::string FormatFooterTime()
     return buf;
 }
 
-// Looks for "Sprint <N>" in a class name (e.g. "BIT370 ... (Sprint 2)") and
-// returns N, or -1 if the name doesn't mention a sprint at all.
-static int ExtractSprintNumber(const std::string& course)
-{
-    for (size_t i = 0; i + 6 <= course.size(); i++)
-    {
-        if (strncasecmp(course.c_str() + i, "Sprint", 6) == 0)
-        {
-            size_t j = i + 6;
-            while (j < course.size() && isspace((unsigned char)course[j]))
-                j++;
-            if (j < course.size() && isdigit((unsigned char)course[j]))
-                return atoi(course.c_str() + j);
-        }
-    }
-    return -1;
-}
-
-// Drops schedule rows for other sprints, per ATTENDANCE_SPRINT ("1" or "2").
-// A class whose name doesn't mention "Sprint" at all is left in either way.
-static void FilterScheduleBySprint(std::vector<ScheduleEntry>& schedule)
-{
-    std::string sprintFilter = dotenv::Get("ATTENDANCE_SPRINT");
-    if (sprintFilter.empty())
-        return;
-
-    int wantSprint = atoi(sprintFilter.c_str());
-    schedule.erase(
-        std::remove_if(schedule.begin(), schedule.end(), [wantSprint](const ScheduleEntry& entry) {
-            int sprint = ExtractSprintNumber(entry.course);
-            return sprint != -1 && sprint != wantSprint;
-        }),
-        schedule.end());
-}
-
 // Draws a QR code (with quiet zone) at originScreenPos, each module moduleSize pixels wide.
 static void DrawQrCode(ImDrawList* drawList, ImVec2 originScreenPos, const uint8_t qrcode[], float moduleSize)
 {
@@ -309,6 +274,58 @@ private:
     std::chrono::steady_clock::time_point fetchedAt_;
 };
 
+// Formats a scanned UID both ways it shows up elsewhere in this pipeline:
+// hex (what the Python RFID server reports and what rfid_client.cpp decodes
+// from) and base64 (what actually goes over the wire in AutoCheckInDto, and
+// what POST /api/nfctags expects when registering a new card).
+static std::string UidToHex(const std::vector<uint8_t>& uid)
+{
+    static const char digits[] = "0123456789ABCDEF";
+    std::string out;
+    out.reserve(uid.size() * 2);
+    for (uint8_t b : uid)
+    {
+        out += digits[(b >> 4) & 0xF];
+        out += digits[b & 0xF];
+    }
+    return out;
+}
+
+static std::string UidToBase64(const std::vector<uint8_t>& uid)
+{
+    static const char table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    out.reserve(((uid.size() + 2) / 3) * 4);
+
+    size_t i = 0;
+    for (; i + 3 <= uid.size(); i += 3)
+    {
+        uint32_t n = (uid[i] << 16) | (uid[i + 1] << 8) | uid[i + 2];
+        out += table[(n >> 18) & 0x3F];
+        out += table[(n >> 12) & 0x3F];
+        out += table[(n >> 6) & 0x3F];
+        out += table[n & 0x3F];
+    }
+
+    size_t remaining = uid.size() - i;
+    if (remaining == 1)
+    {
+        uint32_t n = uid[i] << 16;
+        out += table[(n >> 18) & 0x3F];
+        out += table[(n >> 12) & 0x3F];
+        out += "==";
+    }
+    else if (remaining == 2)
+    {
+        uint32_t n = (uid[i] << 16) | (uid[i + 1] << 8);
+        out += table[(n >> 18) & 0x3F];
+        out += table[(n >> 12) & 0x3F];
+        out += table[(n >> 6) & 0x3F];
+        out += "=";
+    }
+    return out;
+}
+
 // Broad display bucket for one auto-checkin attempt, driving both the
 // status line's text and its color.
 enum class NfcCheckInOutcome
@@ -322,8 +339,11 @@ enum class NfcCheckInOutcome
 struct NfcCheckInEvent
 {
     NfcCheckInOutcome outcome = NfcCheckInOutcome::Error;
-    std::string studentName; // empty for errors -- the server never resolves
-                              // a student on a failure path (see AutoCheckIn)
+    std::string studentName; // filled from the server's studentFirstName/
+                              // studentLastName when it recognized the card
+                              // even on an error path (e.g. NoClassRunning,
+                              // NotEnrolled); empty when it has no identity
+                              // to give (e.g. UnrecognizedBadge).
     std::string statusText;  // e.g. "Checked in to BIT370", "No class to check-in"
 };
 
@@ -389,11 +409,15 @@ private:
             if (!rfid_.WaitForCard(uid))
                 break; // Stop() was called
 
+            printf("NfcCheckInWorker: card read, uid hex=%s base64=%s\n",
+                UidToHex(uid).c_str(), UidToBase64(uid).c_str());
+
             AutoCheckInResult result;
-            std::string errorCode, errorMessage;
+            std::string errorCode, errorMessage, errorStudentFirstName, errorStudentLastName;
             NfcCheckInEvent event;
 
-            if (client_.AutoCheckIn(uid, result, errorCode, errorMessage))
+            if (client_.AutoCheckIn(uid, result, errorCode, errorMessage,
+                    errorStudentFirstName, errorStudentLastName))
             {
                 event.studentName = result.studentFirstName + " " + result.studentLastName;
                 if (result.alreadyCheckedIn)
@@ -411,6 +435,8 @@ private:
             {
                 event.outcome = NfcCheckInOutcome::Error;
                 event.statusText = DescribeAutoCheckInError(errorCode, errorMessage);
+                if (!errorStudentFirstName.empty())
+                    event.studentName = errorStudentFirstName + " " + errorStudentLastName; // card recognized, check-in just couldn't proceed
             }
 
             std::lock_guard<std::mutex> lock(mutex_);
@@ -427,6 +453,125 @@ private:
     std::deque<NfcCheckInEvent> queue_;
 };
 
+// Result of a successful ConnectToApi call: real schedule/session data to
+// replace the offline demo state with.
+struct ApiConnectResult
+{
+    std::vector<ScheduleEntry> schedule;
+    int classSessionId = -1;
+    bool useRemoteTotp = false;
+};
+
+// Authenticates and loads the real schedule/session data from the API --
+// the same steps main() runs once at startup, factored out so
+// ApiConnectWorker can retry them. Returns apiClient.IsReachable(): whether
+// a real response came back at all (even an empty schedule), which is what
+// tells the caller whether to stop retrying.
+static bool ConnectToApi(ApiClient& apiClient, const std::string& configuredRoom, ApiConnectResult& outResult)
+{
+    apiClient.Authenticate();
+
+    if (apiClient.IsEndpointAuth())
+    {
+        // Device (X-Api-Key) auth: room is implicit in the key's server-side
+        // claim, so no ATTENDANCE_ROOM/ResolveRoomId lookup is needed here.
+        if (apiClient.FetchScheduleForEndpoint(outResult.schedule) && !outResult.schedule.empty())
+        {
+            // Not every class has a session yet (e.g. none created for
+            // today) — try each until one resolves, not just the first.
+            for (const ScheduleEntry& entry : outResult.schedule)
+            {
+                if (apiClient.ResolveSessionIdForClass(entry.classId, outResult.classSessionId))
+                {
+                    outResult.useRemoteTotp = true;
+                    break;
+                }
+            }
+            if (!outResult.useRemoteTotp)
+                printf("Attendance API: none of this room's classes have a session yet; showing schedule only.\n");
+        }
+    }
+    else
+    {
+        // User (JWT) auth: a kiosk is physically mounted in one room, so this
+        // scopes every fetch below to just that room's classes/sessions
+        // instead of showing every class in the building.
+        int roomId = -1;
+        if (!configuredRoom.empty() && !apiClient.ResolveRoomId(configuredRoom, roomId))
+            printf("Attendance API: could not resolve ATTENDANCE_ROOM=\"%s\" to a room id; showing all rooms.\n", configuredRoom.c_str());
+
+        apiClient.FetchSchedule(outResult.schedule, roomId);
+        outResult.useRemoteTotp = apiClient.ResolveClassSessionId(outResult.classSessionId, roomId);
+    }
+
+    return apiClient.IsReachable();
+}
+
+// Retries ConnectToApi every 15s in the background until it succeeds, so a
+// kiosk that boots before the API is up (or loses it mid-run) recovers on
+// its own -- showing offline demo data in the meantime -- instead of being
+// stuck showing it until restarted.
+class ApiConnectWorker
+{
+public:
+    ApiConnectWorker(ApiClient& client, std::string configuredRoom)
+        : client_(client), configuredRoom_(std::move(configuredRoom)), thread_(&ApiConnectWorker::Run, this)
+    {
+    }
+
+    ~ApiConnectWorker()
+    {
+        stop_.store(true);
+        if (thread_.joinable())
+            thread_.join();
+    }
+
+    // True once ConnectToApi has succeeded, filling outResult with what it
+    // found. Only fires once -- there's nothing left to retry afterward.
+    bool TakeResult(ApiConnectResult& outResult)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!haveResult_)
+            return false;
+        outResult = std::move(result_);
+        haveResult_ = false;
+        return true;
+    }
+
+private:
+    void Run()
+    {
+        // The caller already made (and failed) one attempt before starting
+        // this worker, so wait out the first interval before trying again
+        // rather than immediately repeating it.
+        while (!stop_.load())
+        {
+            for (int i = 0; i < 150 && !stop_.load(); i++)
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            if (stop_.load())
+                break;
+
+            ApiConnectResult result;
+            if (ConnectToApi(client_, configuredRoom_, result))
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                result_ = std::move(result);
+                haveResult_ = true;
+                return;
+            }
+        }
+    }
+
+    ApiClient& client_;
+    std::string configuredRoom_;
+    std::thread thread_;
+    std::atomic<bool> stop_{false};
+
+    std::mutex mutex_;
+    bool haveResult_ = false;
+    ApiConnectResult result_;
+};
+
 int main(int argc, char* argv[])
 {
     setvbuf(stdout, nullptr, _IOLBF, 0); // flush log lines promptly, e.g. under `tail -f`
@@ -439,7 +584,6 @@ int main(int argc, char* argv[])
     // --- API setup -------------------------------------------------------
     std::string apiUrl = dotenv::Get("ATTENDANCE_API_URL", "http://localhost:5261/");
     ApiClient apiClient(apiUrl);
-    apiClient.Authenticate();
 
     // The QR code encodes a deep link into the student-facing check-in page,
     // not just the bare code, so a phone camera can jump straight there.
@@ -448,50 +592,15 @@ int main(int argc, char* argv[])
         frontendUrl += '/';
 
     std::string configuredRoom = dotenv::Get("ATTENDANCE_ROOM");
-    std::vector<ScheduleEntry> schedule;
-    int classSessionId = -1;
-    bool useRemoteTotp = false;
 
-    if (apiClient.IsEndpointAuth())
-    {
-        // Device (X-Api-Key) auth: room is implicit in the key's server-side
-        // claim, so no ATTENDANCE_ROOM/ResolveRoomId lookup is needed here.
-        if (apiClient.FetchScheduleForEndpoint(schedule) && !schedule.empty())
-        {
-            // Not every class has a session yet (e.g. none created for
-            // today) — try each until one resolves, not just the first.
-            for (const ScheduleEntry& entry : schedule)
-            {
-                if (apiClient.ResolveSessionIdForClass(entry.classId, classSessionId))
-                {
-                    useRemoteTotp = true;
-                    break;
-                }
-            }
-            if (!useRemoteTotp)
-                printf("Attendance API: none of this room's classes have a session yet; showing schedule only.\n");
-        }
-        else
-        {
-            schedule = kFallbackSchedule;
-        }
-    }
-    else
-    {
-        // User (JWT) auth: a kiosk is physically mounted in one room, so this
-        // scopes every fetch below to just that room's classes/sessions
-        // instead of showing every class in the building.
-        int roomId = -1;
-        if (!configuredRoom.empty() && !apiClient.ResolveRoomId(configuredRoom, roomId))
-            printf("Attendance API: could not resolve ATTENDANCE_ROOM=\"%s\" to a room id; showing all rooms.\n", configuredRoom.c_str());
+    ApiConnectResult connectResult;
+    bool apiConnected = ConnectToApi(apiClient, configuredRoom, connectResult);
 
-        if (!apiClient.FetchSchedule(schedule, roomId) || schedule.empty())
-            schedule = kFallbackSchedule;
-
-        useRemoteTotp = apiClient.ResolveClassSessionId(classSessionId, roomId);
-    }
-
-    FilterScheduleBySprint(schedule);
+    std::vector<ScheduleEntry> schedule = connectResult.schedule;
+    int classSessionId = connectResult.classSessionId;
+    bool useRemoteTotp = connectResult.useRemoteTotp;
+    if (schedule.empty())
+        schedule = kFallbackSchedule;
 
     // Room label for the footer bar: prefer the configured room (works
     // under endpoint auth too, since ATTENDANCE_ROOM is just read from the
@@ -503,8 +612,16 @@ int main(int argc, char* argv[])
     if (roomLabel.empty())
         roomLabel = "—";
 
-    if (!apiClient.IsReachable())
-        printf("Attendance API at %s is unreachable; showing offline demo data.\n", apiUrl.c_str());
+    // If the API couldn't be reached at all (as opposed to reachable with an
+    // empty schedule), keep showing the offline demo data above but retry
+    // every 15s in the background -- see the apiConnectWorker check in the
+    // main loop below, which swaps in the real data once it comes back.
+    std::unique_ptr<ApiConnectWorker> apiConnectWorker;
+    if (!apiConnected)
+    {
+        printf("Attendance API at %s is unreachable; showing offline demo data and retrying every 15s.\n", apiUrl.c_str());
+        apiConnectWorker.reset(new ApiConnectWorker(apiClient, configuredRoom));
+    }
 
     // Auto-checkin (NFC tap, read by rfid-py/rfid_server.py and relayed to
     // us over a Unix socket -- see rfid_client.h) is only meaningful under
@@ -661,6 +778,36 @@ int main(int argc, char* argv[])
                 event.window.event == SDL_WINDOWEVENT_CLOSE)
             {
                 running = false;
+            }
+        }
+
+        // Once the background reconnect (see apiConnectWorker above) has
+        // found the API, swap the offline demo state out for the real
+        // thing -- this only ever fires once, since ApiConnectWorker stops
+        // retrying as soon as it succeeds.
+        if (apiConnectWorker)
+        {
+            ApiConnectResult result;
+            if (apiConnectWorker->TakeResult(result))
+            {
+                schedule = result.schedule;
+                classSessionId = result.classSessionId;
+                useRemoteTotp = result.useRemoteTotp;
+                if (schedule.empty())
+                    schedule = kFallbackSchedule;
+
+                roomLabel = configuredRoom;
+                if (roomLabel.empty() && !schedule.empty() && schedule[0].room != "No room")
+                    roomLabel = schedule[0].room;
+                if (roomLabel.empty())
+                    roomLabel = "—";
+
+                if (useRemoteTotp)
+                    totpPoller.reset(new TotpPoller(apiClient, classSessionId));
+                RegenerateQr(BuildCheckInQrText(frontendUrl, classSessionId, currentCode), qrTempBuffer, qrCode);
+
+                printf("Attendance API at %s is reachable again; switched from offline demo data to live data.\n", apiUrl.c_str());
+                apiConnectWorker.reset();
             }
         }
 

@@ -406,7 +406,8 @@ bool ApiClient::FetchTotp(int sessionId, TotpInfo& outTotp)
 }
 
 bool ApiClient::AutoCheckIn(const std::vector<uint8_t>& nfcUid, AutoCheckInResult& outResult,
-    std::string& outErrorCode, std::string& outErrorMessage)
+    std::string& outErrorCode, std::string& outErrorMessage,
+    std::string& outErrorStudentFirstName, std::string& outErrorStudentLastName)
 {
     json body;
     body["nfcUid"] = Base64Encode(nfcUid);
@@ -416,6 +417,8 @@ bool ApiClient::AutoCheckIn(const std::vector<uint8_t>& nfcUid, AutoCheckInResul
     {
         outErrorCode.clear();
         outErrorMessage.clear();
+        outErrorStudentFirstName.clear();
+        outErrorStudentLastName.clear();
 
         // A non-2xx status still means the transport succeeded, so the body
         // is (expected to be) the `{ "error", "message" }` shape below --
@@ -425,6 +428,8 @@ bool ApiClient::AutoCheckIn(const std::vector<uint8_t>& nfcUid, AutoCheckInResul
             json parsed = json::parse(response.body);
             outErrorCode = JsonToString(parsed.value("error", json("")));
             outErrorMessage = JsonToString(parsed.value("message", json("")));
+            outErrorStudentFirstName = JsonToString(parsed.value("studentFirstName", json("")));
+            outErrorStudentLastName = JsonToString(parsed.value("studentLastName", json("")));
         }
         catch (const json::exception&)
         {
